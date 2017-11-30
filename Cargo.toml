@@ -1,0 +1,6 @@
+[package]
+name = "toypqsnark"
+version = "0.1.0"
+authors = ["Stef O'Rear <sorear2@gmail.com>"]
+
+[dependencies]
