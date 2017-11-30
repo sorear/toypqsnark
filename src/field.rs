@@ -1,6 +1,10 @@
 //! Implementation of arithmetic in the field GF(2^255).
 
-use std::ops::{Add,Sub,Mul};
+use std::cmp;
+use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
+use std::num;
+use std::str::FromStr;
+use std::fmt;
 
 // ISA notes:
 //
@@ -18,7 +22,7 @@ use std::ops::{Add,Sub,Mul};
 
 /// A pair of 64-bit values with 16-byte alignment (we don't need the rest of SIMD here).
 #[repr(simd)]
-#[derive(Eq, PartialEq,Copy,Clone,Debug)]
+#[derive(Eq, PartialEq, Copy, Clone, Debug)]
 struct Sixteen(u64, u64);
 
 impl Sixteen {
@@ -26,7 +30,7 @@ impl Sixteen {
     fn mul(self, lix: u8, right: Sixteen, rix: u8) -> Sixteen {
         let result: Sixteen;
         unsafe {
-            match rix*16 + lix {
+            match rix * 16 + lix {
                 0 => asm!("vpclmulqdq $3,$2,$1,$0":"=Y"(result):"Y"(self),"Y"(right),"i"(0)),
                 1 => asm!("vpclmulqdq $3,$2,$1,$0":"=Y"(result):"Y"(self),"Y"(right),"i"(1)),
                 16 => asm!("vpclmulqdq $3,$2,$1,$0":"=Y"(result):"Y"(self),"Y"(right),"i"(16)),
@@ -54,29 +58,34 @@ impl Sixteen {
 }
 
 /// An element of the field GF(2^255).
-#[derive(Copy,Clone)]
+#[derive(Copy, Clone)]
 pub struct FE(Sixteen, Sixteen);
 
 impl FE {
     #[inline]
     pub fn from_words(low: u64, midlow: u64, midhigh: u64, high: u64) -> FE {
-        FE(Sixteen(low,midlow), Sixteen(midhigh,high))
+        FE(Sixteen(low, midlow), Sixteen(midhigh, high))
     }
 
     #[inline]
     pub fn one() -> FE {
-        FE::from_words(1,0,0,0)
+        FE::from_words(1, 0, 0, 0)
     }
 
     #[inline]
     pub fn zero() -> FE {
-        FE::from_words(0,0,0,0)
+        FE::from_words(0, 0, 0, 0)
     }
 
     #[inline]
     pub fn to_words(self) -> (u64, u64, u64, u64) {
         if (self.1 .1 >> 63) != 0 {
-            (self.0 .0 ^ 0x2D, self.0 .1, self.1 .0, self.1 .1 ^ (1 << 63))
+            (
+                self.0 .0 ^ 0x2D,
+                self.0 .1,
+                self.1 .0,
+                self.1 .1 ^ (1 << 63),
+            )
         } else {
             (self.0 .0, self.0 .1, self.1 .0, self.1 .1)
         }
@@ -101,7 +110,7 @@ impl FE {
         let rrdiag0 = rdiag0.xor(rdiag3.mul(1, modulus, 0));
         let rrdiag3 = Sixteen(rdiag3.0, 0);
 
-        let rrprod0 = rrdiag0.xor(Sixteen(0,0).align(rdiag1));
+        let rrprod0 = rrdiag0.xor(Sixteen(0, 0).align(rdiag1));
         let rrprod2 = rdiag2.xor(rdiag1.align(rrdiag3));
 
         FE(rrprod0, rrprod2)
@@ -117,12 +126,26 @@ impl Add for FE {
     }
 }
 
+impl AddAssign for FE {
+    #[inline]
+    fn add_assign(&mut self, other: FE) {
+        *self = *self + other;
+    }
+}
+
 impl Sub for FE {
     type Output = FE;
 
     #[inline]
     fn sub(self, other: FE) -> FE {
         self + other
+    }
+}
+
+impl SubAssign for FE {
+    #[inline]
+    fn sub_assign(&mut self, other: FE) {
+        *self = *self - other;
     }
 }
 
@@ -134,14 +157,24 @@ impl Mul for FE {
         // initial product (upper half and diagonals)
         let diag0 = self.0.mul(0, other.0, 0);
         let diag1 = self.0.mul(1, other.0, 0).xor(self.0.mul(0, other.0, 1));
-        let diag2 = self.1.mul(0, other.0, 0).xor(self.0.mul(1, other.0, 1)).xor(self.0.mul(0, other.1, 0));
-        let diag3 = self.1.mul(1, other.0, 0).xor(self.1.mul(0, other.0, 1)).xor(self.0.mul(1, other.1, 0)).xor(self.0.mul(0, other.1, 1));
-        let diag4 = self.1.mul(1, other.0, 1).xor(self.1.mul(0, other.1, 0)).xor(self.0.mul(1, other.1, 1));
+        let diag2 = self.1
+            .mul(0, other.0, 0)
+            .xor(self.0.mul(1, other.0, 1))
+            .xor(self.0.mul(0, other.1, 0));
+        let diag3 = self.1
+            .mul(1, other.0, 0)
+            .xor(self.1.mul(0, other.0, 1))
+            .xor(self.0.mul(1, other.1, 0))
+            .xor(self.0.mul(0, other.1, 1));
+        let diag4 = self.1
+            .mul(1, other.0, 1)
+            .xor(self.1.mul(0, other.1, 0))
+            .xor(self.0.mul(1, other.1, 1));
         let diag5 = self.1.mul(1, other.1, 0).xor(self.1.mul(0, other.1, 1));
         let diag6 = self.1.mul(1, other.1, 1);
 
         let prod4 = diag4.xor(diag3.align(diag5));
-        let prod6 = diag6.xor(diag5.align(Sixteen(0,0)));
+        let prod6 = diag6.xor(diag5.align(Sixteen(0, 0)));
 
         // reduce once
         let modulus = Sixteen(0x5A, 0);
@@ -154,10 +187,17 @@ impl Mul for FE {
         let rrdiag0 = rdiag0.xor(rdiag3.mul(1, modulus, 0));
         let rrdiag3 = Sixteen(rdiag3.0, 0);
 
-        let rrprod0 = rrdiag0.xor(Sixteen(0,0).align(rdiag1));
+        let rrprod0 = rrdiag0.xor(Sixteen(0, 0).align(rdiag1));
         let rrprod2 = rdiag2.xor(rdiag1.align(rrdiag3));
 
         FE(rrprod0, rrprod2)
+    }
+}
+
+impl MulAssign for FE {
+    #[inline]
+    fn mul_assign(&mut self, other: FE) {
+        *self = *self * other;
     }
 }
 
@@ -170,51 +210,153 @@ impl PartialEq for FE {
 
 impl Eq for FE {}
 
+impl fmt::Display for FE {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.to_words() {
+            (lo, 0, 0, 0) => write!(f, "{:X}", lo),
+            (lo, mlo, 0, 0) => write!(f, "{:X}{:016X}", mlo, lo),
+            (lo, mlo, mhi, 0) => write!(f, "{:X}{:016X}{:016X}", mhi, mlo, lo),
+            (lo, mlo, mhi, hi) => write!(f, "{:X}{:016X}{:016X}{:016X}", hi, mhi, mlo, lo),
+        }
+    }
+}
+
+impl fmt::Debug for FE {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+impl FromStr for FE {
+    type Err = num::ParseIntError;
+
+    fn from_str(mut src: &str) -> Result<FE, num::ParseIntError> {
+        let mut accum = FE::zero();
+        let mut mult = FE::one();
+        while src.len() > 0 {
+            let chunk = cmp::min(src.len(), 15);
+            if !src.is_char_boundary(src.len() - chunk) {
+                return Err(u64::from_str_radix("!", 16).unwrap_err());
+            }
+            let limb = u64::from_str_radix(&src[(src.len() - chunk)..src.len()], 16)?;
+            accum += mult * FE::from_words(limb, 0, 0, 0);
+            mult *= FE::from_words(1 << (4 * chunk), 0, 0, 0);
+            src = &src[0..(src.len() - chunk)];
+        }
+
+        Ok(accum)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use test::Bencher;
     #[test]
     fn test_limb_ops() {
-        assert_eq!(Sixteen(3,5).mul(0,Sixteen(3,5),0), Sixteen(5,0));
-        assert_eq!(Sixteen(3,5).mul(1,Sixteen(3,5),0), Sixteen(15,0));
-        assert_eq!(Sixteen(3,5).mul(0,Sixteen(3,5),1), Sixteen(15,0));
-        assert_eq!(Sixteen(3,5).mul(1,Sixteen(3,5),1), Sixteen(17,0));
+        assert_eq!(Sixteen(3, 5).mul(0, Sixteen(3, 5), 0), Sixteen(5, 0));
+        assert_eq!(Sixteen(3, 5).mul(1, Sixteen(3, 5), 0), Sixteen(15, 0));
+        assert_eq!(Sixteen(3, 5).mul(0, Sixteen(3, 5), 1), Sixteen(15, 0));
+        assert_eq!(Sixteen(3, 5).mul(1, Sixteen(3, 5), 1), Sixteen(17, 0));
     }
 
     #[test]
     fn test_fe() {
-        assert_eq!(FE::from_words(1,2,3,4).to_words(), (1,2,3,4));
-        assert_eq!(FE::from_words(1,2,3,0x8000000000000004).to_words(), (0x2C,2,3,4));
+        assert_eq!(FE::from_words(1, 2, 3, 4).to_words(), (1, 2, 3, 4));
+        assert_eq!(
+            FE::from_words(1, 2, 3, 0x8000000000000004).to_words(),
+            (0x2C, 2, 3, 4)
+        );
 
-        assert_eq!((FE::from_words(1,2,3,4) + FE::from_words(8,16,32,48)).to_words(), (9,18,35,52));
-        assert_eq!((FE::from_words(1,2,3,4) - FE::from_words(8,16,32,48)).to_words(), (9,18,35,52));
+        assert_eq!(
+            (FE::from_words(1, 2, 3, 4) + FE::from_words(8, 16, 32, 48)).to_words(),
+            (9, 18, 35, 52)
+        );
+        assert_eq!(
+            (FE::from_words(1, 2, 3, 4) - FE::from_words(8, 16, 32, 48)).to_words(),
+            (9, 18, 35, 52)
+        );
 
-        assert_eq!((FE::from_words(1,0,0,0) * FE::from_words(1,0,0,0)).to_words(), (1,0,0,0));
-        assert_eq!((FE::from_words(0,1,0,0) * FE::from_words(1,0,0,0)).to_words(), (0,1,0,0));
-        assert_eq!((FE::from_words(0,0,1,0) * FE::from_words(1,0,0,0)).to_words(), (0,0,1,0));
-        assert_eq!((FE::from_words(0,0,0,1) * FE::from_words(1,0,0,0)).to_words(), (0,0,0,1));
-        assert_eq!((FE::from_words(1,0,0,0) * FE::from_words(0,1,0,0)).to_words(), (0,1,0,0));
-        assert_eq!((FE::from_words(0,1,0,0) * FE::from_words(0,1,0,0)).to_words(), (0,0,1,0));
-        assert_eq!((FE::from_words(0,0,1,0) * FE::from_words(0,1,0,0)).to_words(), (0,0,0,1));
-        assert_eq!((FE::from_words(0,0,0,1) * FE::from_words(0,1,0,0)).to_words(), (0x5A,0,0,0));
-        assert_eq!((FE::from_words(1,0,0,0) * FE::from_words(0,0,1,0)).to_words(), (0,0,1,0));
-        assert_eq!((FE::from_words(0,1,0,0) * FE::from_words(0,0,1,0)).to_words(), (0,0,0,1));
-        assert_eq!((FE::from_words(0,0,1,0) * FE::from_words(0,0,1,0)).to_words(), (0x5A,0,0,0));
-        assert_eq!((FE::from_words(0,0,0,1) * FE::from_words(0,0,1,0)).to_words(), (0,0x5A,0,0));
-        assert_eq!((FE::from_words(1,0,0,0) * FE::from_words(0,0,0,1)).to_words(), (0,0,0,1));
-        assert_eq!((FE::from_words(0,1,0,0) * FE::from_words(0,0,0,1)).to_words(), (0x5A,0,0,0));
-        assert_eq!((FE::from_words(0,0,1,0) * FE::from_words(0,0,0,1)).to_words(), (0,0x5A,0,0));
-        assert_eq!((FE::from_words(0,0,0,1) * FE::from_words(0,0,0,1)).to_words(), (0,0,0x5A,0));
+        assert_eq!(
+            (FE::from_words(1, 0, 0, 0) * FE::from_words(1, 0, 0, 0)).to_words(),
+            (1, 0, 0, 0)
+        );
+        assert_eq!(
+            (FE::from_words(0, 1, 0, 0) * FE::from_words(1, 0, 0, 0)).to_words(),
+            (0, 1, 0, 0)
+        );
+        assert_eq!(
+            (FE::from_words(0, 0, 1, 0) * FE::from_words(1, 0, 0, 0)).to_words(),
+            (0, 0, 1, 0)
+        );
+        assert_eq!(
+            (FE::from_words(0, 0, 0, 1) * FE::from_words(1, 0, 0, 0)).to_words(),
+            (0, 0, 0, 1)
+        );
+        assert_eq!(
+            (FE::from_words(1, 0, 0, 0) * FE::from_words(0, 1, 0, 0)).to_words(),
+            (0, 1, 0, 0)
+        );
+        assert_eq!(
+            (FE::from_words(0, 1, 0, 0) * FE::from_words(0, 1, 0, 0)).to_words(),
+            (0, 0, 1, 0)
+        );
+        assert_eq!(
+            (FE::from_words(0, 0, 1, 0) * FE::from_words(0, 1, 0, 0)).to_words(),
+            (0, 0, 0, 1)
+        );
+        assert_eq!(
+            (FE::from_words(0, 0, 0, 1) * FE::from_words(0, 1, 0, 0)).to_words(),
+            (0x5A, 0, 0, 0)
+        );
+        assert_eq!(
+            (FE::from_words(1, 0, 0, 0) * FE::from_words(0, 0, 1, 0)).to_words(),
+            (0, 0, 1, 0)
+        );
+        assert_eq!(
+            (FE::from_words(0, 1, 0, 0) * FE::from_words(0, 0, 1, 0)).to_words(),
+            (0, 0, 0, 1)
+        );
+        assert_eq!(
+            (FE::from_words(0, 0, 1, 0) * FE::from_words(0, 0, 1, 0)).to_words(),
+            (0x5A, 0, 0, 0)
+        );
+        assert_eq!(
+            (FE::from_words(0, 0, 0, 1) * FE::from_words(0, 0, 1, 0)).to_words(),
+            (0, 0x5A, 0, 0)
+        );
+        assert_eq!(
+            (FE::from_words(1, 0, 0, 0) * FE::from_words(0, 0, 0, 1)).to_words(),
+            (0, 0, 0, 1)
+        );
+        assert_eq!(
+            (FE::from_words(0, 1, 0, 0) * FE::from_words(0, 0, 0, 1)).to_words(),
+            (0x5A, 0, 0, 0)
+        );
+        assert_eq!(
+            (FE::from_words(0, 0, 1, 0) * FE::from_words(0, 0, 0, 1)).to_words(),
+            (0, 0x5A, 0, 0)
+        );
+        assert_eq!(
+            (FE::from_words(0, 0, 0, 1) * FE::from_words(0, 0, 0, 1)).to_words(),
+            (0, 0, 0x5A, 0)
+        );
 
-        assert_eq!(FE::from_words(1,2,3,4) == FE::from_words(1,2,3,4), true);
-        assert_eq!(FE::from_words(1,2,3,4) == FE::from_words(1,2,3,5), false);
+        assert_eq!(
+            FE::from_words(1, 2, 3, 4) == FE::from_words(1, 2, 3, 4),
+            true
+        );
+        assert_eq!(
+            FE::from_words(1, 2, 3, 4) == FE::from_words(1, 2, 3, 5),
+            false
+        );
 
-        let v = FE::from_words(11111111,22222222,33333333,444444444);
+        let v = FE::from_words(11111111, 22222222, 33333333, 444444444);
         let mut vp = v;
         for _ in 0..254 {
             assert_eq!(vp == FE::one(), false);
             assert_eq!(vp * vp == vp.square(), true);
+            assert_eq!(FE::from_str(&format!("{}", vp)).unwrap(), vp);
             vp = (vp * vp) * v;
         }
         assert_eq!(vp == FE::one(), true);
@@ -222,15 +364,15 @@ mod test {
 
     #[bench]
     fn bench_seq_mul(b: &mut Bencher) {
-        let mut v = FE::from_words(11111111,22222222,33333333,444444444);
-        let vx = FE::from_words(11111111,55555555,33333333,444444444);
+        let mut v = FE::from_words(11111111, 22222222, 33333333, 444444444);
+        let vx = FE::from_words(11111111, 55555555, 33333333, 444444444);
         b.iter(|| v = v * vx);
     }
 
     #[bench]
     fn bench_par_mul(b: &mut Bencher) {
-        let v = FE::from_words(11111111,22222222,33333333,444444444);
-        let vx = FE::from_words(11111111,55555555,33333333,444444444);
+        let v = FE::from_words(11111111, 22222222, 33333333, 444444444);
+        let vx = FE::from_words(11111111, 55555555, 33333333, 444444444);
         let mut i = 0;
         b.iter(|| {
             i = i + 1;
@@ -240,8 +382,7 @@ mod test {
 
     #[bench]
     fn bench_par_sqr(b: &mut Bencher) {
-        let v = FE::from_words(11111111,22222222,33333333,444444444);
-        let vx = FE::from_words(11111111,55555555,33333333,444444444);
+        let v = FE::from_words(11111111, 22222222, 33333333, 444444444);
         let mut i = 0;
         b.iter(|| {
             i = i + 1;
