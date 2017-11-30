@@ -115,6 +115,18 @@ impl FE {
 
         FE(rrprod0, rrprod2)
     }
+
+    pub fn invert(self) -> FE {
+        let mut tmp = self;
+        for _ in 0..253 {
+            tmp = tmp.square() * self;
+        }
+        tmp.square()
+    }
+
+    pub const fn dimension() -> usize {
+        255
+    }
 }
 
 impl Add for FE {
@@ -357,6 +369,7 @@ mod test {
             assert_eq!(vp == FE::one(), false);
             assert_eq!(vp * vp == vp.square(), true);
             assert_eq!(FE::from_str(&format!("{}", vp)).unwrap(), vp);
+            assert_eq!(vp.invert() * vp, FE::one());
             vp = (vp * vp) * v;
         }
         assert_eq!(vp == FE::one(), true);

@@ -1,5 +1,4 @@
 use field::FE;
-use std::mem;
 
 static ROUND_CONSTANTS: [FE; 128] = [
     FE::from_words(
@@ -774,6 +773,7 @@ static ROUND_CONSTANTS: [FE; 128] = [
 
 pub fn cipher1(mut chain: FE, key: &[FE]) -> FE {
     assert_eq!(key.len(), 32);
+    assert_eq!(FE::dimension(), 255); // if you change this you need new round constants
     for i in 0..128 {
         chain += ROUND_CONSTANTS[i] + key[i & 31];
         chain *= chain.square();
@@ -789,6 +789,7 @@ pub fn cipher2(chains: [&mut FE; 2], keys: [&[FE]; 2]) {
     let kb = keys[1];
     assert_eq!(ka.len(), 32);
     assert_eq!(kb.len(), 32);
+    assert_eq!(FE::dimension(), 255);
     for i in 0..128 {
         ca += ROUND_CONSTANTS[i] + ka[i & 31];
         ca *= ca.square();
@@ -799,9 +800,21 @@ pub fn cipher2(chains: [&mut FE; 2], keys: [&[FE]; 2]) {
     *chains[1] = cb;
 }
 
+pub fn testdata(n: usize, k: usize) -> Vec<FE> {
+    let mut outp = Vec::new();
+    for i in 0..n {
+        let mut ary = [FE::zero(); 32];
+        ary[0] = FE::from_words((k + i) as u64, 0, 0, 0);
+        ary[1] = FE::one();
+        outp.push(cipher1(FE::zero(), &ary));
+    }
+    outp
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::mem;
     use test::Bencher;
 
     #[bench]

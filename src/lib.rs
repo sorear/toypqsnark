@@ -6,3 +6,4 @@ extern crate test;
 
 pub mod field;
 pub mod hash;
+pub mod fft;
