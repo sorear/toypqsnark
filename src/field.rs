@@ -63,7 +63,7 @@ pub struct FE(Sixteen, Sixteen);
 
 impl FE {
     #[inline]
-    pub fn from_words(low: u64, midlow: u64, midhigh: u64, high: u64) -> FE {
+    pub const fn from_words(low: u64, midlow: u64, midhigh: u64, high: u64) -> FE {
         FE(Sixteen(low, midlow), Sixteen(midhigh, high))
     }
 
