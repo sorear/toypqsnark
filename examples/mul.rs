@@ -1,16 +1,25 @@
 extern crate toypqsnark;
 use toypqsnark::field::FE;
+use toypqsnark::hash;
+use toypqsnark::fft;
 
 fn main() {
-    let v = FE::from_words(1234567, 2345678, 3456789, 4567890);
-    let mut a = Vec::new();
-    a.resize(1, v);
-    for _ in 0..1_000_000_000 / a.len() {
-        for aa in &mut a {
-            *aa = aa.square();
-        }
+    let k = std::env::args().nth(1).unwrap().parse::<usize>().unwrap();
+
+    let mut poly = Vec::new();
+    poly.resize(1 << k, FE::zero());
+
+    for fe in hash::testdata(1 << 15, 1000) {
+        poly[fe.to_words().0 as usize & ((1 << k) - 1)] = fe;
     }
-    for aa in &a {
-        println!("{:?}", aa.to_words());
-    }
+
+    let beta = hash::testdata(k, 0);
+
+    let start = std::time::Instant::now();
+    fft::additive_fft(&mut poly, 1 << k, &beta);
+    println!(
+        "{:?} --- {}",
+        std::time::Instant::now().duration_since(start),
+        poly[0].to_words().0 & 1
+    );
 }
