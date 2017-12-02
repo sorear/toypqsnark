@@ -127,6 +127,16 @@ impl FE {
     pub const fn dimension() -> usize {
         255
     }
+
+    pub fn degree(self) -> i32 {
+        match self.to_words() {
+            (0, 0, 0, 0) => -1,
+            (lo, 0, 0, 0) => 63 - lo.leading_zeros() as i32,
+            (_, mlo, 0, 0) => 127 - mlo.leading_zeros() as i32,
+            (_, _, mhi, 0) => 191 - mhi.leading_zeros() as i32,
+            (_, _, _, hi) => 255 - hi.leading_zeros() as i32,
+        }
+    }
 }
 
 impl Add for FE {
@@ -373,6 +383,16 @@ mod test {
             vp = (vp * vp) * v;
         }
         assert_eq!(vp == FE::one(), true);
+    }
+
+    #[test]
+    fn test_degree() {
+        assert_eq!(FE::zero().degree(), -1);
+        assert_eq!(FE::one().degree(), 0);
+        assert_eq!(FE::from_words(4, 0, 0, 0).degree(), 2);
+        assert_eq!(FE::from_words(0, 4, 0, 0).degree(), 66);
+        assert_eq!(FE::from_words(0, 0, 4, 0).degree(), 130);
+        assert_eq!(FE::from_words(0, 0, 0, 4).degree(), 194);
     }
 
     #[bench]

@@ -800,6 +800,14 @@ pub fn cipher2(chains: [&mut FE; 2], keys: [&[FE]; 2]) {
     *chains[1] = cb;
 }
 
+pub fn prf2(key: FE, index: FE) -> FE {
+    let mut ary = [FE::zero(); 32];
+    ary[0] = key;
+    ary[1] = index;
+    ary[2] = FE::one();
+    cipher1(FE::zero(), &ary)
+}
+
 pub fn testdata(n: usize, k: usize) -> Vec<FE> {
     let mut outp = Vec::new();
     for i in 0..n {
