@@ -17,6 +17,9 @@ impl AffinePoly {
     fn square(&self) -> AffinePoly {
         let mut n = self.clone();
         n.0.insert(1, FE::zero());
+        for coe in &mut n.0 {
+            *coe = coe.square();
+        }
         n
     }
 }
@@ -51,14 +54,14 @@ impl Coset {
     }
 
     pub fn zero_poly(&self) -> AffinePoly {
-        let mut f = AffinePoly(vec![self.base]);
+        let mut f = AffinePoly(vec![self.base, FE::one()]);
 
-        for gen in &self.generators {
-            // f(x) := f(x)f(g+x) = f(x)^2 + f(g)f(x)
+        for &gen in &self.generators {
+            // f(x) := f(x)f(g+x) = (f(x)+f(g)+f(0))f(x)
             let mut n = f.square();
-            let fg = f.eval(*gen);
+            let fg0 = f.eval(gen) + f.eval(FE::zero());
             for i in 0..f.0.len() {
-                n.0[i] += fg * f.0[i];
+                n.0[i] += fg0 * f.0[i];
             }
             f = n;
         }
@@ -74,6 +77,7 @@ impl Coset {
     // an iterator could be faster
     pub fn index(&self, ix: usize) -> FE {
         let mut coord = self.base;
+        assert!(ix < self.size());
         for j in 0..self.generators.len() {
             if (ix & (1 << j)) != 0 {
                 coord += self.generators[j];
@@ -126,8 +130,8 @@ impl Coset {
 
 pub fn poly_eval(poly: &[FE], point: FE) -> FE {
     let mut a = poly[poly.len() - 1];
-    for c in poly.iter().rev() {
-        a = a * point + *c;
+    for c in 0..(poly.len() - 1) {
+        a = a * point + poly[poly.len() - 2 - c];
     }
     a
 }
@@ -143,5 +147,40 @@ pub fn poly_shift(poly: &mut [FE], mut point: FE) {
         }
         block <<= 1;
         point = point.square();
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use hash;
+
+    #[test]
+    fn test_cosets() {
+        let c3 = Coset::affine(hash::testdata(1, 0)[0], hash::testdata(3, 1));
+
+        assert!(c3.size() == 8);
+        assert!(c3.index(0) == c3.base);
+        assert!(c3.index(5) == c3.base + c3.generators[0] + c3.generators[2]);
+
+        assert!(c3.zero_poly().eval(FE::zero()) != FE::zero());
+        for i in 0..8 {
+            assert!(c3.zero_poly().eval(c3.index(i)) == FE::zero());
+        }
+
+        assert!(!c3.redundant());
+        assert!(Coset::linear(vec![c3.base, c3.base]).redundant());
+        assert!(!Coset::linear(vec![FE::one(), c3.base]).redundant());
+        assert!(Coset::linear(vec![FE::one(), c3.base, c3.base + FE::one()]).redundant());
+    }
+
+    #[test]
+    fn test_poly() {
+        let p = hash::testdata(4, 0);
+        let pp = hash::testdata(1, 4)[0];
+        assert_eq!(
+            poly_eval(&p, pp),
+            p[0] + p[1] * pp + p[2] * pp * pp + p[3] * pp * pp * pp
+        );
     }
 }

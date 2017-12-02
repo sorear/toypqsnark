@@ -102,10 +102,22 @@ fn setup_afft(poly: &[FE], mut poly_size_hint: usize, inbeta: &[FE], rev: bool) 
 
     let mut beta = Vec::from(&*inbeta);
     loop {
-        let b_high = beta.last().cloned().unwrap_or(FE::zero());
+        if beta.len() == 0 {
+            ctx.levels.push(AFFTLevel {
+                poly_size_hint,
+                b_high: FE::zero(),
+                b_high_inv: FE::zero(),
+                beta: beta,
+                gamma_psum: Vec::new(),
+                beta_powers: Vec::new(),
+            });
+            break;
+        }
+
+        let b_high = beta[beta.len() - 1];
         let b_high_inv = b_high.invert();
 
-        if beta.len() <= 1 {
+        if beta.len() == 1 {
             ctx.levels.push(AFFTLevel {
                 poly_size_hint,
                 b_high,
@@ -302,12 +314,14 @@ fn quadratic_afft(poly: &mut [FE], beta: &[FE]) {
 mod test {
     use super::*;
     use hash;
+    use geom::Coset;
 
     #[test]
     fn test_afft() {
         for size in 0..4 {
             let mut poly = hash::testdata(1 << size, 0);
             let beta = hash::testdata(size, 1 << size);
+            assert!(!Coset::linear(beta.clone()).redundant());
             let mut p2 = poly.clone();
             let mut p3 = poly.clone();
             additive_fft(&mut poly, 1 << size, &beta);

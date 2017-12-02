@@ -30,11 +30,12 @@ impl FRIParams {
         };
 
         // 0-challenge 1-reply is an awkward edge case
-        assert!(coset.size() > stop_size && coset.size() > (localization << rate));
+        assert!(coset.size() > stop_size && coset.size() > (1 << (localization + rate)));
 
         loop {
+            assert!(!coset.redundant());
             param.cosets.push(coset.clone());
-            if coset.size() <= stop_size || coset.size() <= (localization << rate) {
+            if coset.size() <= stop_size || coset.size() <= (1 << (localization + rate)) {
                 break;
             }
 
@@ -45,7 +46,7 @@ impl FRIParams {
             };
             let quot = small.zero_poly();
             coset.base = quot.eval(coset.base);
-            coset.generators.drain(0..2);
+            coset.generators.drain(0..localization);
             for g in &mut coset.generators {
                 *g = quot.eval(*g);
             }
@@ -72,6 +73,7 @@ impl FRIParams {
 
 pub fn prover_message(param: &FRIParams, round: usize, last: &[FE], challenge: FE) -> Vec<FE> {
     assert!(last.len() == param.cosets[round].size());
+    assert!(!param.small_cosets[round].redundant());
     let loc = param.localization;
 
     let mut reduced = Vec::new();
@@ -83,6 +85,18 @@ pub fn prover_message(param: &FRIParams, round: usize, last: &[FE], challenge: F
     // will be faster if the fft is unrolled for typical loc values 2-4
     // consider sending a sequence of polynomials instead to reduce verifier work
     for i in 0..reduced.len() {
+        assert!(
+            param.small_cosets[round]
+                .zero_poly()
+                .eval(param.cosets[round].index(i << loc))
+                == param.cosets[round + 1].index(i)
+        );
+        assert!(
+            param.small_cosets[round]
+                .zero_poly()
+                .eval(param.cosets[round].index((i << loc) + 1))
+                == param.cosets[round + 1].index(i)
+        );
         scratch.copy_from_slice(&last[i << loc..(i + 1) << loc]);
         fft::inv_additive_fft(&mut scratch, &param.small_cosets[round].generators);
         reduced[i] = geom::poly_eval(&scratch, param.cosets[round].index(i << loc) + challenge);
@@ -159,7 +173,38 @@ pub fn verifier_accepts(param: &FRIParams, randomness: FE, challenges: &[FE], da
             ) {
             return false;
         }
+        data_ix += lastsz;
     }
 
     return true;
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_prover_completeness() {
+        let mut poly = hash::testdata(128, 0);
+        let coset = Coset::linear(hash::testdata(10, 200));
+        let param = FRIParams::new(coset.clone(), 3, 1, 1, 500);
+        let challenges = hash::testdata(param.challenges, 300);
+        poly.resize(1024, FE::zero());
+        fft::additive_fft(&mut poly, 1024, &coset.generators);
+
+        let mut messages = vec![poly];
+        for round in 0..param.challenges {
+            let next = prover_message(&param, round, &messages[round], challenges[round]);
+            messages.push(next);
+        }
+
+        let randomness = hash::testdata(1, 400)[0];
+        let queries = verifier_queries(&param, randomness);
+        let results = queries
+            .iter()
+            .map(|&(msg, ix)| messages[msg][ix])
+            .collect::<Vec<_>>();
+        let accepts = verifier_accepts(&param, randomness, &challenges, &results);
+        assert!(accepts);
+    }
 }

@@ -117,6 +117,7 @@ impl FE {
     }
 
     pub fn invert(self) -> FE {
+        assert!(self != FE::zero());
         let mut tmp = self;
         for _ in 0..253 {
             tmp = tmp.square() * self;
