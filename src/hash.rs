@@ -781,6 +781,18 @@ pub fn cipher1(mut chain: FE, key: &[FE]) -> FE {
     chain
 }
 
+pub fn hash1(mut input: &[FE]) -> FE {
+    let mut chain = FE::zero();
+    while input.len() >= 32 {
+        chain = cipher1(chain, &input[0..32]) + chain;
+        input = &input[32..];
+    }
+    let mut ary = [FE::zero(); 32];
+    &ary[0..input.len()].copy_from_slice(input);
+    ary[input.len()] = FE::one();
+    cipher1(chain, &ary) + chain
+}
+
 #[inline(never)]
 pub fn cipher2(chains: [&mut FE; 2], keys: [&[FE]; 2]) {
     let mut ca = *chains[0];
@@ -806,6 +818,10 @@ pub fn prf2(key: FE, index: FE) -> FE {
     ary[1] = index;
     ary[2] = FE::one();
     cipher1(FE::zero(), &ary)
+}
+
+pub fn prf2i(key: FE, index: usize) -> usize {
+    prf2(key, FE::from_int(index)).to_words().0 as usize
 }
 
 pub fn testdata(n: usize, k: usize) -> Vec<FE> {

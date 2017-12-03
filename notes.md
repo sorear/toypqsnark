@@ -61,42 +61,53 @@ variable.
 
 ## proof that it is sufficient to run FRI on the linear combination
 
-Suppose that f[1] ... f[k] are approximate codewords in some linear code of
-dimension z and distance h over F, and that a random linear (affine)
-combination of the fs is within distance eps of a codeword, eps < h/4, with
-probability p + |F|^-k, p > 2 / (|F| - 1).  Then there exists a set S of at
-most eps (1 + k / floor(p/2 (|F|-1))) codeword positions such that the error of
-each f[i] is contained in S.
+Suppose that _f<sub>1</sub>_ &hellip; _f<sub>k</sub>_ are approximate codewords
+in some linear code of dimension _z_ and distance _h_ over **F**, and that a
+random linear (affine) combination of the *f*s is within distance _&epsilon;_
+of a codeword, _&epsilon;_ < _h_/4, with probability _p +
+|_**F**_|<sup>-k</sup>_, _p_ > 2/(|_**F**_| - 1).  Then there exists a set
+**S** of at most _&epsilon;_ (1 + _k_ / &lfloor;_p_/2 (|**F**|-1)&rfloor;)
+codeword positions such that the error of each _f<sub>i</sub>_ is contained in
+**S**.
 
 Proof:
 
-Let eps' <= eps < h/4 be the largest distance at most eps which is achieved by
-a linear combination.  Let O be the coordinate of a linear combination which
-reaches eps'.  There are a fraction p of better linear combinations on (|F|^k -
-1) / (|F| - 1) disjoint lines passing through O; a fraction p/2 of such lines
-must have p/2 better linear combinations each.
+Let _&epsilon;&prime;_ &leq; _&epsilon;_ < _h_/4 be the largest distance at
+most _&epsilon;_ which is achieved by a linear combination.  Let _O_ be the
+coordinate of a linear combination which reaches _&epsilon;&prime;_.  There are
+a fraction _p_ of better linear combinations on (|**F**|<sup>k</sup> -
+1)/(|**F**| - 1) disjoint lines passing through _O_; a fraction _p_/2 of such
+lines must have _p_/2 better linear combinations each.
 
-Let DO be the difference between O's combination and the (unique) nearest
-codeword; DO's support has size |DO| = eps'.
+Let **DO** be the difference between _O_'s combination and the (unique) nearest
+codeword; **DO**'s support has size |**DO**| = _&epsilon;&prime;_.
 
 The total volume of these lines is greater than the volume of a hyperplane so
-they span the linear space.  Let B be a linearly independent subset of lines
-with >= p/2 eps-points (eps'-points) each; |B| = k.
+they span the linear space.  Let **B** be a linearly independent subset of
+lines with &geq; _p_/2 _&epsilon;_-points (_&epsilon;&prime;_-points) each;
+|**B**| = _k_.
 
-Each line ell in B has at least q = fl(1 + p(|F|-1)/2) eps'-points; pick one
-other than O and call it P[ell], defining DP[ell] as for DO.  Every point on
-ell can be obtained as a linear combination of O and P[ell]; let S[ell] be the
-union of the supports of DO and DP[ell], and thus a superset of the error
-support for each point on ell, immediately |S[ell]| <= 2eps.
+Each line _&ell;_ in **B** has at least _q_ = &lfloor;1 +
+_p_(|**F**|-1)/2&rfloor; _&epsilon;&prime;_-points; pick one other than _O_ and
+call it _P<sub>&ell;</sub>_, defining **DP<sub>&ell;</sub>** as for **DO**.
+Every point on _&ell;_ can be obtained as a linear combination of _O_ and
+_P<sub>&ell;</sub>_; let **S<sub>&ell;</sub>** be the union of the supports of
+**DO** and **DP<sub>&ell;</sub>**, and thus a superset of the error support for
+each point on _&ell;_, immediately |**S<sub>&ell;</sub>**| &leq; 2*&epsilon;*.
 
-Each error position in S[ell] is linear along ell, does not vanish identically,
-and thus vanishes at exactly one point.  Each eps'-point requires the error to
-vanish at |S[ell]|-eps positions, thus q(|S[ell]|-eps') <= |S[ell]|, |S[ell]| <=
-eps' q/(q-1), |S[ell]-DO|=|S[ell]|-eps' <= eps'/(q-1).
+Each error position in **S<sub>&ell;</sub>** is linear along _&ell;_, does not
+vanish identically, and thus vanishes at exactly one point.  Each
+_&epsilon;&prime;_-point requires the error to vanish at
+|**S<sub>&ell;</sub>**|-_&epsilon;&prime;_ positions, thus by counting
+_q_(|**S<sub>&ell;</sub>**|-_&epsilon;&prime;_) &leq; |**S<sub>&ell;</sub>**|,
+|**S<sub>&ell;</sub>**| &leq; _&epsilon;&prime; q_/(_q_-1),
+|**S<sub>&ell;</sub>**-**DO**|=|**S<sub>&ell;</sub>**|-_&epsilon;&prime;_ &leq;
+_&epsilon;&prime;_/(_q_-1).
 
-Let S be the union of S[ell] for each ell in B.  |S-DO| <= eps' k/(q-1) and S
-bounds the error of a linearly independent set of points, thus the whole space,
-including the fs.
+Let **S** be the union of **S<sub>&ell;</sub>** for each _&ell;_ in **B**.
+|**S**-**DO**| &leq; _&epsilon;&prime; k_/(_q_-1) and since **S** bounds the
+error of a linearly independent set of points, it bounds the error for the
+whole space, including the *f*s. &#x220e;
 
 ## contents of a succinct proof
 
@@ -158,9 +169,46 @@ soundness.
 ## intuition for aFFT and FRI
 
 A polynomial of degree n can be expressed as a polynomial of degree n/k in a
-degree k polynomial and a degree \<k leftover.  If the short polynomial is a
+degree k polynomial and a degree < k leftover.  If the short polynomial is a
 subspace quotient polynomial, the polynomial can then be evaluated at n/k
-points instead of n points, resulting in degree \<k polylets to evaluate at the
+points instead of n points, resulting in degree < k polylets to evaluate at the
 original n points.  The affine FFT uses a special degree k polynomial which can
 be expanded without multiplications; a more general affine FFT would require
 extra multiplications, but FRI can stop before that point.
+
+## achieving zero knowledge
+
+A proof reveals information about the satisfying assignment in the following
+ways:
+
+* The FRI subprotocol can reveal nonlocal information about the test function.
+
+  Solution: include one uniformly random "mask" function in the linear
+combination, so that revealing the entire test function reveals no information.
+
+* The auxilliary functions for constraints may contain nonlocal information.
+
+  Solution: Use separate Merkle trees for auxilliary functions and any
+variable functions which might be accessed shifted, such that the auxilliary
+functions are only revealed at coordinates where the verifier can already
+compute their values.
+
+* The verifier can directly query a variable assignment in the consistency
+test.
+
+  Solution: Execute the protocol using a point set not overlapping with the
+point set on which the assignment is defined.
+
+* The verifier's queries to the variable functions can reveal nonlocal
+algebraic information about the assignment.
+
+  Solution: Include a block of random values in each variable function on a
+number of points greater than the number of verifier queries, including shifts.
+Note that this increases the degree of each polynomial; in order to stay below
+a power of 2 for FRI, a degree-reduction scheme is needed, such as dividing by
+an affine subspace polynomial (since they are very sparse, this is likely
+faster than a FFT-based approach).
+
+## random gotchas
+
+Affine subspace polynomials are affine, not linear.

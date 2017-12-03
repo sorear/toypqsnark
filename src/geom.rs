@@ -24,18 +24,27 @@ impl AffinePoly {
     }
 }
 
-fn gauss_elim(rows: &mut [FE]) {
+fn gauss_elim(rows: &mut [FE]) -> Vec<usize> {
+    let mut inverse = Vec::new();
+    for l in 0..rows.len() {
+        inverse.push(1usize.wrapping_shl(l as u32));
+    }
+
     for i in 0..rows.len() {
         if let Some(j) = (i..rows.len()).max_by_key(|&j| rows[j].degree()) {
             rows.swap(i, j);
+            inverse.swap(i, j);
         }
 
         for j in i + 1..rows.len() {
             if rows[j].degree() == rows[i].degree() {
                 rows[j] += rows[i];
+                inverse[j] ^= inverse[i];
             }
         }
     }
+
+    inverse
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +93,25 @@ impl Coset {
             }
         }
         coord
+    }
+
+    pub fn reverse_index(&self, mut point: FE) -> Option<usize> {
+        self.size();
+        let mut row_echelon = self.generators.clone();
+        let inverse = gauss_elim(&mut row_echelon);
+        let mut coord = 0;
+        point += self.base;
+        for (&g, &i) in row_echelon.iter().zip(&inverse) {
+            if point.degree() == g.degree() {
+                point += g;
+                coord ^= i;
+            }
+        }
+        if point == FE::zero() {
+            Some(coord)
+        } else {
+            None
+        }
     }
 
     fn reduce(&self) -> Coset {
@@ -166,7 +194,9 @@ mod test {
         assert!(c3.zero_poly().eval(FE::zero()) != FE::zero());
         for i in 0..8 {
             assert!(c3.zero_poly().eval(c3.index(i)) == FE::zero());
+            assert_eq!(c3.reverse_index(c3.index(i)), Some(i));
         }
+        assert_eq!(c3.reverse_index(FE::zero()), None);
 
         assert!(!c3.redundant());
         assert!(Coset::linear(vec![c3.base, c3.base]).redundant());

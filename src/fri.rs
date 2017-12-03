@@ -1,41 +1,41 @@
 use field::FE;
 use fft;
-use hash;
 use geom::{self, Coset};
 
-pub struct FRIParams {
-    rate: usize,
-    localization: usize,
-    repetitions: usize,
-    challenges: usize,
-    cosets: Vec<Coset>,
-    small_cosets: Vec<Coset>,
+pub struct ParamsBuilder {
+    pub coset: Coset,
+    pub rate: usize,
+    pub localization: usize,
+    pub stop_size: usize,
 }
 
-impl FRIParams {
-    pub fn new(
-        mut coset: Coset,
-        rate: usize,
-        localization: usize,
-        stop_size: usize,
-        repetitions: usize,
-    ) -> FRIParams {
-        let mut param = FRIParams {
+impl ParamsBuilder {
+    pub fn build(self) -> Params {
+        let ParamsBuilder {
+            mut coset,
             rate,
             localization,
-            repetitions,
+            stop_size,
+        } = self;
+        let mut param = Params {
+            rate,
+            localization,
             challenges: 0,
             cosets: Vec::new(),
             small_cosets: Vec::new(),
         };
 
         // 0-challenge 1-reply is an awkward edge case
-        assert!(coset.size() > stop_size && coset.size() > (1 << (localization + rate)));
+        assert!(coset.size() > (1 << (localization + rate)));
 
         loop {
             assert!(!coset.redundant());
             param.cosets.push(coset.clone());
-            if coset.size() <= stop_size || coset.size() <= (1 << (localization + rate)) {
+            if coset.size() <= (1 << (localization + rate)) {
+                break;
+            }
+
+            if param.challenges >= 1 && coset.size() <= stop_size {
                 break;
             }
 
@@ -48,7 +48,7 @@ impl FRIParams {
             coset.base = quot.eval(coset.base);
             coset.generators.drain(0..localization);
             for g in &mut coset.generators {
-                *g = quot.eval(*g);
+                *g = quot.eval(*g) + quot.eval(FE::zero());
             }
 
             param.small_cosets.push(small);
@@ -57,7 +57,17 @@ impl FRIParams {
 
         param
     }
+}
 
+pub struct Params {
+    rate: usize,
+    localization: usize,
+    challenges: usize,
+    cosets: Vec<Coset>,
+    small_cosets: Vec<Coset>,
+}
+
+impl Params {
     pub fn messages(&self) -> usize {
         self.challenges + 1
     }
@@ -71,7 +81,7 @@ impl FRIParams {
     }
 }
 
-pub fn prover_message(param: &FRIParams, round: usize, last: &[FE], challenge: FE) -> Vec<FE> {
+pub fn prover_message(param: &Params, round: usize, last: &[FE], challenge: FE) -> Vec<FE> {
     assert!(last.len() == param.cosets[round].size());
     assert!(!param.small_cosets[round].redundant());
     let loc = param.localization;
@@ -110,70 +120,60 @@ pub fn prover_message(param: &FRIParams, round: usize, last: &[FE], challenge: F
     reduced
 }
 
-fn prf2i(key: FE, tweak: u64) -> u64 {
-    hash::prf2(key, FE::from_words(tweak, 0, 0, 0)).to_words().0
-}
-
-pub fn verifier_queries(param: &FRIParams, randomness: FE) -> Vec<(usize, usize)> {
+pub fn verifier_queries(param: &Params, mut index: usize) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
+    assert!(index <= param.cosets[0].size());
 
-    for i in 0..param.repetitions {
-        // index generation can be changed if this becomes a problem for the embedded verifier
-        let mut index = prf2i(randomness, i as u64) as usize & (param.cosets[0].size() - 1);
-
-        for j in 0..param.challenges {
-            index = index >> param.localization;
-            for k in 0..(1 << param.localization) {
-                out.push((j, (index << param.localization) + k));
-            }
+    for j in 0..param.challenges {
+        index = index >> param.localization;
+        for k in 0..(1 << param.localization) {
+            out.push((j, (index << param.localization) + k));
         }
+    }
 
-        for j in 0..param.message_size(param.challenges) {
-            out.push((param.challenges, j));
-        }
+    for j in 0..param.message_size(param.challenges) {
+        out.push((param.challenges, j));
     }
 
     out
 }
 
-pub fn verifier_accepts(param: &FRIParams, randomness: FE, challenges: &[FE], data: &[FE]) -> bool {
+pub fn verifier_accepts(param: &Params, mut index: usize, challenges: &[FE], data: &[FE]) -> bool {
     let mut data_ix = 0;
     let loc = param.localization;
     let mut scratch = Vec::new();
     scratch.resize(1 << loc, FE::zero());
+    assert!(index <= param.cosets[0].size());
+    assert!(challenges.len() == param.challenges);
 
-    for i in 0..param.repetitions {
-        let mut index = prf2i(randomness, i as u64) as usize & (param.cosets[0].size() - 1);
-        let mut last = None;
+    let mut last = None;
 
-        for j in 0..param.challenges {
-            scratch.copy_from_slice(&data[data_ix..data_ix + (1 << loc)]);
-            data_ix += 1 << loc;
+    for j in 0..param.challenges {
+        scratch.copy_from_slice(&data[data_ix..data_ix + (1 << loc)]);
+        data_ix += 1 << loc;
 
-            if let Some(l) = last {
-                if l != scratch[index & ((1 << loc) - 1)] {
-                    return false;
-                }
+        if let Some(l) = last {
+            if l != scratch[index & ((1 << loc) - 1)] {
+                return false;
             }
-
-            index = index >> loc;
-
-            fft::inv_additive_fft(&mut scratch, &param.small_cosets[j].generators);
-            last = Some(geom::poly_eval(
-                &scratch,
-                challenges[j] + param.cosets[j].index(index << loc),
-            ));
         }
 
-        let lastsz = param.message_size(param.challenges);
-        if last.unwrap()
-            != geom::poly_eval(
-                &data[data_ix..(data_ix + lastsz)],
-                param.cosets[param.challenges].index(index),
-            ) {
-            return false;
-        }
-        data_ix += lastsz;
+        index = index >> loc;
+
+        fft::inv_additive_fft(&mut scratch, &param.small_cosets[j].generators);
+        last = Some(geom::poly_eval(
+            &scratch,
+            challenges[j] + param.cosets[j].index(index << loc),
+        ));
+    }
+
+    let lastsz = param.message_size(param.challenges);
+    if last.unwrap()
+        != geom::poly_eval(
+            &data[data_ix..(data_ix + lastsz)],
+            param.cosets[param.challenges].index(index),
+        ) {
+        return false;
     }
 
     return true;
@@ -182,12 +182,22 @@ pub fn verifier_accepts(param: &FRIParams, randomness: FE, challenges: &[FE], da
 #[cfg(test)]
 mod test {
     use super::*;
+    use hash;
+
+    fn prf2i(key: FE, tweak: u64) -> u64 {
+        hash::prf2(key, FE::from_words(tweak, 0, 0, 0)).to_words().0
+    }
 
     #[test]
     fn test_prover_completeness() {
         let mut poly = hash::testdata(128, 0);
         let coset = Coset::linear(hash::testdata(10, 200));
-        let param = FRIParams::new(coset.clone(), 3, 1, 1, 500);
+        let param = ParamsBuilder {
+            coset: coset.clone(),
+            rate: 3,
+            localization: 1,
+            stop_size: 1,
+        }.build();
         let challenges = hash::testdata(param.challenges, 300);
         poly.resize(1024, FE::zero());
         fft::additive_fft(&mut poly, 1024, &coset.generators);
@@ -199,12 +209,16 @@ mod test {
         }
 
         let randomness = hash::testdata(1, 400)[0];
-        let queries = verifier_queries(&param, randomness);
-        let results = queries
-            .iter()
-            .map(|&(msg, ix)| messages[msg][ix])
-            .collect::<Vec<_>>();
-        let accepts = verifier_accepts(&param, randomness, &challenges, &results);
-        assert!(accepts);
+        for i in 0..500 {
+            let mut index = prf2i(randomness, i as u64) as usize & (coset.size() - 1);
+
+            let queries = verifier_queries(&param, index);
+            let results = queries
+                .iter()
+                .map(|&(msg, ix)| messages[msg][ix])
+                .collect::<Vec<_>>();
+            let accepts = verifier_accepts(&param, index, &challenges, &results);
+            assert!(accepts);
+        }
     }
 }

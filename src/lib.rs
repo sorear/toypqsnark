@@ -8,5 +8,6 @@ pub mod field;
 pub mod hash;
 pub mod fft;
 pub mod geom;
-pub mod macsp;
 pub mod fri;
+pub mod merkle;
+pub mod macsp_snark;

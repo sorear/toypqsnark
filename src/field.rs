@@ -67,6 +67,10 @@ impl FE {
         FE(Sixteen(low, midlow), Sixteen(midhigh, high))
     }
 
+    pub fn from_int(low: usize) -> FE {
+        FE::from_words(low as u64, 0, 0, 0)
+    }
+
     #[inline]
     pub fn one() -> FE {
         FE::from_words(1, 0, 0, 0)
@@ -123,6 +127,22 @@ impl FE {
             tmp = tmp.square() * self;
         }
         tmp.square()
+    }
+
+    pub fn pow(self, mut exp: usize) -> FE {
+        let mut base = self;
+        let mut acc = FE::one();
+
+        while exp > 0 {
+            if (exp & 1) != 0 {
+                acc *= base;
+            }
+
+            exp /= 2;
+            base = base.square();
+        }
+
+        acc
     }
 
     pub const fn dimension() -> usize {
@@ -375,6 +395,11 @@ mod test {
         );
 
         let v = FE::from_words(11111111, 22222222, 33333333, 444444444);
+        assert_eq!(v.pow(0), FE::one());
+        assert_eq!(v.pow(1), v);
+        assert_eq!(v.pow(4), v.square().square());
+        assert_eq!(v.pow(5), v * v.square().square());
+
         let mut vp = v;
         for _ in 0..254 {
             assert_eq!(vp == FE::one(), false);
