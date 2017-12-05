@@ -70,7 +70,10 @@ enum ExprWalk<T> {
 }
 
 impl ExprInfo {
-    fn walk<R, F>(&self, func: &mut F) -> R where F: FnMut(ExprWalk<R>) -> R {
+    fn walk<R, F>(&self, func: &mut F) -> R
+    where
+        F: FnMut(ExprWalk<R>) -> R,
+    {
         let ss = match *self {
             ExprInfo::Const(fe) => ExprWalk::Const(fe),
             ExprInfo::Coord => ExprWalk::Coord,
@@ -269,7 +272,11 @@ impl ParamsBuilder {
 
         let mut xor_shifts = vec![0];
         for &shift in &csp_info.unique_shifts {
-            xor_shifts.push(evaluation_coset.reverse_index(shift).expect("evaluation coset not closed under shifts"));
+            xor_shifts.push(
+                evaluation_coset
+                    .reverse_index(shift)
+                    .expect("evaluation coset not closed under shifts"),
+            );
         }
 
         Params {
@@ -398,13 +405,16 @@ impl Params {
         // QUERY phase for agreement betwixt polynomials and the test function
 
         for query in 0..self.constraint_checks {
-            let point = hash::prf2i(final_challenge, query + self.fri_checks) & (self.evaluation_coset.size() - 1);
+            let point = hash::prf2i(final_challenge, query + self.fri_checks)
+                & (self.evaluation_coset.size() - 1);
 
             let mut shifted_pages = Vec::new();
             for &shift_amt in &self.xor_shifts {
-                let page =
-                    self.shifted_vars_tparam
-                        .read_path(&shifted_root, point ^ shift_amt, &mut proof)?;
+                let page = self.shifted_vars_tparam.read_path(
+                    &shifted_root,
+                    point ^ shift_amt,
+                    &mut proof,
+                )?;
                 shifted_pages.push(page);
             }
 
@@ -520,6 +530,7 @@ impl Params {
         for (name, vec) in &assignment.values {
             let vi = self.csp_info.variables.get(&*name).unwrap();
             let mut work = vec.clone();
+            assert!(vec.len() == coset.size());
             fft::inv_additive_fft(&mut work, &coset.generators);
             geom::poly_shift(&mut work, coset.base + evaluation_coset.base);
             work.resize(poly_size, FE::zero());
@@ -544,37 +555,36 @@ impl Params {
 
         let mut zero_cancel = Vec::new();
         for i in 0..poly_size {
-            zero_cancel.push(evaluation_coset.index(i));
+            zero_cancel.push(coset.zero_poly().eval(evaluation_coset.index(i)));
         }
         FE::batch_invert(&mut zero_cancel);
 
         for constraint in &self.csp_info.constraints {
-            let poly = constraint.expr.walk::<Vec<FE>, _>(&mut |w| {
-                match w {
-                    ExprWalk::Const(fe) => vec![fe; poly_size],
-                    ExprWalk::Coord => (0..poly_size).map(|i| evaluation_coset.index(i)).collect(),
-                    ExprWalk::Var(shifted, ix, sval) => {
-                        let sxor = evaluation_coset.reverse_index(sval).unwrap();
-                        let mut result = Vec::new();
-                        for i in 0..poly_size {
-                            result.push(if shifted {
-                                shift_poly[shift_page_size * (sxor ^ i) + ix]
-                            } else {
-                                unshift_poly[unshift_page_size * i + ix]
-                            });
-                        }
-                        result
+            let poly = constraint.expr.walk::<Vec<FE>, _>(&mut |w| match w {
+                ExprWalk::Const(fe) => vec![fe; poly_size],
+                ExprWalk::Coord => (0..poly_size).map(|i| evaluation_coset.index(i)).collect(),
+                ExprWalk::Var(shifted, ix, sval) => {
+                    let sxor = evaluation_coset.reverse_index(sval).unwrap();
+                    let mut result = Vec::new();
+                    for i in 0..poly_size {
+                        result.push(if shifted {
+                            shift_poly[shift_page_size * (sxor ^ i) + ix]
+                        } else {
+                            unshift_poly[unshift_page_size * i + ix]
+                        });
                     }
-                    ExprWalk::Add(l, r) => l.into_iter().zip(r).map(|(a, b)| a + b).collect(),
-                    ExprWalk::Mul(l, r) => l.into_iter().zip(r).map(|(a, b)| a * b).collect(),
+                    result
                 }
+                ExprWalk::Add(l, r) => l.into_iter().zip(r).map(|(a, b)| a + b).collect(),
+                ExprWalk::Mul(l, r) => l.into_iter().zip(r).map(|(a, b)| a * b).collect(),
             });
 
             if constraint.quotients > 1 {
                 unimplemented!();
             } else {
                 for i in 0..poly_size {
-                    unshift_poly[unshift_page_size * i + constraint.first_quotient] = poly[i] * zero_cancel[i];
+                    unshift_poly[unshift_page_size * i + constraint.first_quotient] =
+                        poly[i] * zero_cancel[i];
                 }
             }
         }
@@ -627,8 +637,13 @@ impl Params {
         // FRI-COMMIT
 
         for n in 1..self.fri_param.messages() {
-            let fri_next = fri::prover_message(&self.fri_param, n - 1, &fri_messages[n], hash::hash1(&commitments));
-            if n < self.fri_param.messages() - 1 {
+            let fri_next = fri::prover_message(
+                &self.fri_param,
+                n - 1,
+                &fri_messages[n - 1],
+                hash::hash1(&commitments),
+            );
+            if n == self.fri_param.messages() - 1 {
                 proof.extend_from_slice(&fri_next);
                 commitments.extend_from_slice(&fri_next);
             } else {
@@ -642,7 +657,8 @@ impl Params {
 
         let final_challenge = hash::hash1(&commitments);
         for query in 0..self.fri_checks {
-            let mut index = hash::prf2i(final_challenge, query) & (self.evaluation_coset.size() - 1);
+            let mut index =
+                hash::prf2i(final_challenge, query) & (self.evaluation_coset.size() - 1);
 
             for message in 0..(self.fri_param.messages() - 1) {
                 index /= self.fri_localization;
@@ -653,16 +669,74 @@ impl Params {
         // consistency checks
 
         for query in 0..self.constraint_checks {
-            let point = hash::prf2i(final_challenge, query + self.fri_checks) & (self.evaluation_coset.size() - 1);
+            let point = hash::prf2i(final_challenge, query + self.fri_checks)
+                & (self.evaluation_coset.size() - 1);
 
             for &shift_amt in &self.xor_shifts {
                 shift_prover.emit_path(&shift_poly, point ^ shift_amt, &mut proof);
             }
 
             unshift_prover.emit_path(&unshift_poly, point, &mut proof);
-            fri_message_provers[0].emit_path(&fri_messages[0], point / self.fri_localization, &mut proof);
+            fri_message_provers[0].emit_path(
+                &fri_messages[0],
+                point / self.fri_localization,
+                &mut proof,
+            );
         }
 
         return proof;
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn test_csp_complete() {
+        let coset1 = Coset::affine(
+            FE::from_int(1),
+            (1..5).map(|i| FE::from_int(1 << i)).collect(),
+        );
+        let coset2 = Coset::linear((1..8).map(|i| FE::from_int(1 << i)).collect());
+        let p = ParamsBuilder {
+            csp: CSP {
+                items: vec![
+                    Item::Variable("x".to_owned()),
+                    Item::Constraint(
+                        "x01".to_owned(),
+                        Expr::Mul(
+                            Box::new(Expr::Var("x".to_owned(), FE::from_int(2))),
+                            Box::new(Expr::Add(
+                                Box::new(Expr::Const(FE::one())),
+                                Box::new(Expr::Var("x".to_owned(), FE::from_int(2))),
+                            )),
+                        ),
+                    ),
+                ],
+                coset: coset1,
+                dont_care: None,
+            },
+            evaluation_coset: coset2,
+            merkle_radix: 4,
+            constraint_checks: 50,
+            fri_checks: 50,
+            inverse_rate: 8,
+            fri_localization: 2,
+            masked: false,
+        }.build();
+        let asn = Assignment {
+            values: vec![
+                (
+                    "x".to_owned(),
+                    (0..16i8)
+                        .map(|i| FE::from_int(i.count_ones() as usize % 2))
+                        .collect(),
+                ),
+            ].into_iter()
+                .collect(),
+        };
+        let proof = p.prove(&asn);
+        let accepts = p.verify(&proof);
+        assert!(accepts);
     }
 }

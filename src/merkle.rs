@@ -88,14 +88,24 @@ impl Params {
     }
 
     pub fn make_tree(&self, data: &[FE]) -> Prover {
-        assert!(data.len() % self.page_size == 0);
-        assert!(data.len() / self.page_size == self.num_points);
+        assert!(data.len() == self.page_size * self.num_points);
 
         let mut hash_levels = Vec::<Vec<FE>>::new();
-        hash_levels.push(data.chunks(self.page_size).map(|c| hash::hash1(c)).collect());
+        if self.page_size == 0 {
+            hash_levels.push(vec![hash::hash1(&[]); self.num_points]);
+        } else {
+            hash_levels.push(
+                data.chunks(self.page_size)
+                    .map(|c| hash::hash1(c))
+                    .collect(),
+            );
+        }
 
         for i in 0..self.depth {
-            let next = hash_levels[i-1].chunks(self.radix).map(|c| hash::hash1(c)).collect();
+            let next = hash_levels[i - 1]
+                .chunks(self.radix)
+                .map(|c| hash::hash1(c))
+                .collect();
             hash_levels.push(next);
         }
 

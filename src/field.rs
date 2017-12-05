@@ -441,7 +441,7 @@ mod test {
     fn test_batch_invert() {
         let mut a = vec![FE::from_int(2), FE::from_int(3), FE::from_int(4)];
         let b = a.iter().map(|x| x.invert()).collect::<Vec<_>>();
-        FE::batch_invert(&a);
+        FE::batch_invert(&mut a);
         assert_eq!(a, b);
     }
 
