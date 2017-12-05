@@ -129,6 +129,22 @@ impl FE {
         tmp.square()
     }
 
+    // "Montgomery's trick"
+    pub fn batch_invert(elems: &mut [FE]) {
+        let mut partials = Vec::new();
+        let mut all = FE::one();
+        for e in &*elems {
+            partials.push(all);
+            all *= *e;
+        }
+        all = all.invert();
+        for i in (0..elems.len()).rev() {
+            let old = elems[i];
+            elems[i] = all * partials[i];
+            all *= old;
+        }
+    }
+
     pub fn pow(self, mut exp: usize) -> FE {
         let mut base = self;
         let mut acc = FE::one();
@@ -419,6 +435,14 @@ mod test {
         assert_eq!(FE::from_words(0, 4, 0, 0).degree(), 66);
         assert_eq!(FE::from_words(0, 0, 4, 0).degree(), 130);
         assert_eq!(FE::from_words(0, 0, 0, 4).degree(), 194);
+    }
+
+    #[test]
+    fn test_batch_invert() {
+        let mut a = vec![FE::from_int(2), FE::from_int(3), FE::from_int(4)];
+        let b = a.iter().map(|x| x.invert()).collect::<Vec<_>>();
+        FE::batch_invert(&a);
+        assert_eq!(a, b);
     }
 
     #[bench]

@@ -31,6 +31,7 @@ impl ParamsBuilder {
     }
 }
 
+#[derive(Clone)]
 pub struct Params {
     num_points: usize,
     page_size: usize,
@@ -84,5 +85,49 @@ impl Params {
         } else {
             None
         }
+    }
+
+    pub fn make_tree(&self, data: &[FE]) -> Prover {
+        assert!(data.len() % self.page_size == 0);
+        assert!(data.len() / self.page_size == self.num_points);
+
+        let mut hash_levels = Vec::<Vec<FE>>::new();
+        hash_levels.push(data.chunks(self.page_size).map(|c| hash::hash1(c)).collect());
+
+        for i in 0..self.depth {
+            let next = hash_levels[i-1].chunks(self.radix).map(|c| hash::hash1(c)).collect();
+            hash_levels.push(next);
+        }
+
+        Prover {
+            param: self.clone(),
+            hash_levels,
+        }
+    }
+}
+
+pub struct Prover {
+    param: Params,
+    hash_levels: Vec<Vec<FE>>,
+}
+
+impl Prover {
+    pub fn emit_path(&self, message: &[FE], mut page: usize, proof: &mut Vec<FE>) {
+        let size = self.param.page_size;
+        let radix = self.param.radix;
+        proof.extend(&message[page * size..(page + 1) * size]);
+
+        for l in 0..self.param.depth {
+            let slot = page % radix;
+            page /= radix;
+            let mut level = Vec::from(&self.hash_levels[l][page * radix..(page + 1) * radix]);
+            level.swap_remove(slot);
+            proof.extend(&level);
+        }
+    }
+
+    pub fn emit_root(&self, proof: &mut Vec<FE>) -> FE {
+        proof.extend(&self.hash_levels[self.param.depth]);
+        hash::hash1(&self.hash_levels[self.param.depth])
     }
 }

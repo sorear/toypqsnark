@@ -212,3 +212,40 @@ faster than a FFT-based approach).
 ## random gotchas
 
 Affine subspace polynomials are affine, not linear.
+
+## additive FFT memory optimization
+
+We can make the aFFT run in-place by adding stride support to the "taylor
+expansion" subroutine.  The corresponding bit reversal is absorbed by a
+relabeling of the basis.
+
+Intel designs share a memory channel between roughly eight cores, providing
+rougly 3/4 of a field element of memory bandwidth per multiply.  F1, based on
+_very_ imprecise ballparking, should support 100 multipliers and 100 bytes per
+cycle of memory access at 500MHz, thus 1/30 field element per multiply (and the
+multiplication equivalent of 500 2.5GHz Skylake cores).
+
+During aFFT, the active communicating bits move from the top of the polynomial
+to the bottom, then jump back to the top, repeating until the last few lines
+are exclusively near the top.  A small number of transposes is thus not
+adequate although the number of passes over memory can be reduced by a factor
+of 9-20 through cache aware operations; the larger reductions require strongly
+coordinated, topology-aware multithreading.
+
+Higher-radix versions of the aFFT are possible in more general fields by
+expressing the "taylor expansion" using a more general affine subspace
+polynomial.  The major catch is that general twisting is no longer possible,
+and if the polynomial has coefficients not 0 or 1 a large number of
+multiplications are added; for general bases this is only profitable on FPGAs,
+although optimizing the basis to use a smaller polynomial can help a great
+deal.  This also increases the number of active bits and thus reduces the
+amount of window slack; radices larger than the square root of the relevant
+cache size are unlikely to be useful for that reason.
+
+For the practically relevant size range of 2^24 - 2^26 elements, a CPU
+implementation will require ~12 read/write passes over memory while the FPGA
+implementation requires ~4; both are memory bound and GPUs are worth
+investigating.
+
+More efficient shifts are possible using a twist, additive shift by 1, twist
+again algorithm.  The second twist can be absorbed in a subsequent FFT.
