@@ -2,6 +2,7 @@ extern crate toypqsnark;
 use toypqsnark::field::FE;
 use toypqsnark::hash;
 use toypqsnark::fft;
+use toypqsnark::geom::Coset;
 
 fn main() {
     let k = std::env::args().nth(1).unwrap().parse::<usize>().unwrap();
@@ -16,7 +17,7 @@ fn main() {
     let beta = hash::testdata(k, 0);
 
     let start = std::time::Instant::now();
-    fft::additive_fft(&mut poly, 1 << k, &beta);
+    fft::LCF::prepare(&Coset::linear(&beta)).evaluate(&mut poly);
     println!(
         "{:?} --- {}",
         std::time::Instant::now().duration_since(start),

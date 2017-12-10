@@ -2,14 +2,15 @@
 // IEEE Trans. Inf. Theor., 56(12):6265–6272, December 2010.
 
 use field::FE;
+use geom::Coset;
 
 fn taylor_expand(poly: &mut [FE]) {
     // t is fixed to 2
-    assert!((poly.len() % 2) == 0);
-
     if poly.len() <= 2 {
         return;
     }
+
+    assert!((poly.len() % 2) == 0);
 
     let two_k = poly.len().next_power_of_two() >> 2;
 
@@ -37,11 +38,11 @@ fn taylor_expand(poly: &mut [FE]) {
 }
 
 fn inv_taylor_expand(poly: &mut [FE]) {
-    assert!((poly.len() % 2) == 0);
-
     if poly.len() <= 2 {
         return;
     }
+
+    assert!((poly.len() % 2) == 0);
 
     let two_k = poly.len().next_power_of_two() >> 2;
 
@@ -310,18 +311,84 @@ fn quadratic_afft(poly: &mut [FE], beta: &[FE]) {
     }
 }
 
+// https://arxiv.org/pdf/1404.3458.pdf
+pub struct LCF {
+    wbase: Vec<FE>,
+    wjump: Vec<Vec<FE>>,
+}
+
+impl LCF {
+    pub fn prepare(c: &Coset) -> LCF {
+        let mut wbase = Vec::new();
+        let mut wjump = Vec::new();
+
+        for i in 0..c.generators.len() {
+            let wfunc = Coset::linear(&c.generators[0..i]).zero_poly();
+            let norm = wfunc.eval(c.generators[i]).invert();
+            wbase.push(wfunc.eval(c.base) * norm);
+            let mut wscan = FE::zero();
+            let mut wprefix = Vec::new();
+            for &g in &c.generators[i + 1..] {
+                wscan += wfunc.eval(g) * norm;
+                wprefix.push(wscan);
+            }
+            wprefix.push(wscan);
+            wjump.push(wprefix);
+        }
+
+        LCF { wbase, wjump }
+    }
+
+    pub fn interpolate(&self, poly: &mut [FE]) {
+        assert!(poly.len().is_power_of_two());
+
+        for lstride in 0..poly.len().trailing_zeros() as usize {
+            let mut point = self.wbase[lstride];
+            for i in 0..poly.len() / (2 << lstride) {
+                for offs in 0..(1 << lstride) {
+                    let ii = offs + i * (2 << lstride);
+                    let ij = ii + (1 << lstride);
+                    poly[ij] += poly[ii];
+                    poly[ii] += poly[ij] * point;
+                }
+                point += self.wjump[lstride][(i + 1).trailing_zeros() as usize];
+            }
+            //assert!(point == self.wbase[lstride]);
+        }
+    }
+
+    pub fn evaluate(&self, poly: &mut [FE]) {
+        assert!(poly.len().is_power_of_two());
+
+        for lstride in (0..poly.len().trailing_zeros() as usize).rev() {
+            let mut point = self.wbase[lstride];
+            for i in 0..poly.len() / (2 << lstride) {
+                for offs in 0..(1 << lstride) {
+                    let ii = offs + i * (2 << lstride);
+                    let ij = ii + (1 << lstride);
+                    poly[ii] += poly[ij] * point;
+                    poly[ij] += poly[ii];
+                }
+                point += self.wjump[lstride][(i + 1).trailing_zeros() as usize];
+            }
+            //assert!(point == self.wbase[lstride]);
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use hash;
     use geom::Coset;
+    use geom::poly_shift;
 
     #[test]
     fn test_afft() {
         for size in 0..4 {
             let mut poly = hash::testdata(1 << size, 0);
             let beta = hash::testdata(size, 1 << size);
-            assert!(!Coset::linear(beta.clone()).redundant());
+            assert!(!Coset::linear(&beta).redundant());
             let mut p2 = poly.clone();
             let mut p3 = poly.clone();
             additive_fft(&mut poly, 1 << size, &beta);
@@ -329,6 +396,27 @@ mod test {
             assert_eq!(poly, p2);
             inv_additive_fft(&mut poly, &beta);
             assert_eq!(poly, p3);
+        }
+    }
+
+    #[test]
+    fn test_lcf() {
+        for size in 4..8 {
+            let mut poly = hash::testdata(1 << size, 0);
+            let beta = hash::testdata(size + 2, 1 << size);
+            let base = hash::testdata(1, size + 2 + (1 << size))[0];
+            let mut poly2 = poly.clone();
+
+            inv_additive_fft(&mut poly, &beta[..size]);
+            poly.resize(4 << size, FE::zero());
+            poly_shift(&mut poly, base);
+            additive_fft(&mut poly, 1 << size, &beta);
+
+            LCF::prepare(&Coset::linear(&beta[..size])).interpolate(&mut poly2);
+            poly2.resize(4 << size, FE::zero());
+            LCF::prepare(&Coset::affine(base, &beta)).evaluate(&mut poly2);
+
+            assert!(poly == poly2);
         }
     }
 }

@@ -695,9 +695,9 @@ mod test {
     fn test_csp_complete() {
         let coset1 = Coset::affine(
             FE::from_int(1),
-            (1..5).map(|i| FE::from_int(1 << i)).collect(),
+            &(1..5).map(|i| FE::from_int(1 << i)).collect::<Vec<_>>(),
         );
-        let coset2 = Coset::linear((1..8).map(|i| FE::from_int(1 << i)).collect());
+        let coset2 = Coset::linear(&(1..8).map(|i| FE::from_int(1 << i)).collect::<Vec<_>>());
         let p = ParamsBuilder {
             csp: CSP {
                 items: vec![

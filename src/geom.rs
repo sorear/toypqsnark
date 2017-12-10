@@ -54,12 +54,15 @@ pub struct Coset {
 }
 
 impl Coset {
-    pub fn linear(gen: Vec<FE>) -> Coset {
+    pub fn linear(gen: &[FE]) -> Coset {
         Coset::affine(FE::zero(), gen)
     }
 
-    pub fn affine(base: FE, generators: Vec<FE>) -> Coset {
-        Coset { base, generators }
+    pub fn affine(base: FE, generators: &[FE]) -> Coset {
+        Coset {
+            base,
+            generators: generators.to_owned(),
+        }
     }
 
     pub fn zero_poly(&self) -> AffinePoly {
@@ -185,7 +188,7 @@ mod test {
 
     #[test]
     fn test_cosets() {
-        let c3 = Coset::affine(hash::testdata(1, 0)[0], hash::testdata(3, 1));
+        let c3 = Coset::affine(hash::testdata(1, 0)[0], &hash::testdata(3, 1));
 
         assert!(c3.size() == 8);
         assert!(c3.index(0) == c3.base);
@@ -199,9 +202,9 @@ mod test {
         assert_eq!(c3.reverse_index(FE::zero()), None);
 
         assert!(!c3.redundant());
-        assert!(Coset::linear(vec![c3.base, c3.base]).redundant());
-        assert!(!Coset::linear(vec![FE::one(), c3.base]).redundant());
-        assert!(Coset::linear(vec![FE::one(), c3.base, c3.base + FE::one()]).redundant());
+        assert!(Coset::linear(&[c3.base, c3.base]).redundant());
+        assert!(!Coset::linear(&[FE::one(), c3.base]).redundant());
+        assert!(Coset::linear(&[FE::one(), c3.base, c3.base + FE::one()]).redundant());
     }
 
     #[test]

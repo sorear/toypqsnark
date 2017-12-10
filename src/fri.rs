@@ -191,7 +191,7 @@ mod test {
     #[test]
     fn test_prover_completeness() {
         let mut poly = hash::testdata(128, 0);
-        let coset = Coset::linear(hash::testdata(10, 200));
+        let coset = Coset::linear(&hash::testdata(10, 200));
         let param = ParamsBuilder {
             coset: coset.clone(),
             rate: 3,
